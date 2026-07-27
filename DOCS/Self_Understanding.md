@@ -41,3 +41,39 @@ app/ingestion/processor.py
 
 This will handle all the processed of loading and chunking the data i.e. It will process the full ingestion pipeline.
 ---
+
+---
+Tools used to extract data from the website
+
+1. BeautifulSoup
+2. Firecrawl
+3. Crawl AI
+---
+
+---
+If query Dimension and the Vector DB ingested data dimesions differ then you won't be able to do the cosine similarity search and will have to add the meta data filtering based on the
+user query dimesion.
+
+In the prod we will maintain the dimesions during the retirval we won't be performing similarity searches on the two different dimesions.
+---
+
+---
+Q: How to handle PDF's that have images with text under it.
+A: Generally using captioning, most of the recent layout detection models can handle that, the New PP Doc layout its open source at hugging face, and YOLO Doc layout model also
+works really great.
+---
+
+---
+BM25 is a sparse vector based search algorithm.
+---
+
+---
+Best Chunking Strategy
+If we talk about overall multi modal perpective
+1. Layout Aware chunking or context aware chunking
+2. Semantic based chunking and rest all chunking strategies.
+---
+
+---
+Logfire is a observibility tool for the developers
+----
