@@ -28,4 +28,11 @@ def parse_html(file_path: str):
 
             #3. Clean white spaces and collaps multilple newlines
 
-            lines = 
+            lines = (line.strip() for line in text.splitlines())
+            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+            text_clean = '\n'.join(chunk for chunk in chunks if chunk)
+
+            return text_clean
+        except Exception as e:
+            logfire.error(f"Error parsing HTML: {e}")
+            raise e
