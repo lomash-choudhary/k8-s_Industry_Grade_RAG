@@ -82,6 +82,10 @@ def _embed_batch(batch: list[str]) -> list[list[float]]:
 
 
 def embed_query(query: str) -> list[float]:
+    _init()
+    if _model_type == "gemini":
+        return _active_model.embed_query(query)
+    return _active_model.encode([query])[0].tolist()
     
     
 
