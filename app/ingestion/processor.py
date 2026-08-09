@@ -29,14 +29,79 @@ def save_processed_locally(data: dict, source_type: str, filename: str) -> str:
     Save parsed chunk metadata as JSON in processed_data/<source_type>/.
     """
 
-    pass
+    folder = os.path.join(PROCESSED_DATA_DIR, source_type)
+    os.makedirs(folder, exist_ok=True)
+    dest = os.path.join(folder, f"{filename}.json")
+    with open(dest, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    return dest
 
 def process_file(file_path: str, filename: str, source_type: str):
     """
     Parse -> chunk -> save locally -> embed -> index in Qdrant.
     """
+    with logfire.span("Processing File", file=filename, source=source_type):
+        try:
+            # 1. Extraction of the text based on the file type or extension
+            ext = filename.lower().rsplit(".", 1)[-1]
+            if ext == "pdf":
+                full_text = parse_pdf(file_path)
+            elif ext in ("html", "htm"):
+                full_text = parse_html(file_path)
+            elif ext == "txt":
+                full_text = parse_text(file_path)
+            elif ext in ("docx", "pptx"):
+                from app.ingestion.loaders.office import parse_office
+                full_text = parse_office(file_path)
+            else:
+                logfire.warning(f"Skipping unsupported file type: {filename}")
+                return
+            
+            if not full_text or not full_text.strip():
+                logfire.warning(f"No text extracted from {filename} - skipping.")
+                return
 
-    pass
+            #2. Chunk the text
+            chunks = chunk_text(full_text)
+            if not chunks:
+                return
+
+            # 3. Save processed metadata locally
+            processed_data = {
+                "filename": filename,
+                "source_type": source_type,
+                "chunks": chunks,
+            }
+            
+            local_path = save_processed_locally(processed_data, source_type, filename)
+            logfire.info(f"Saved processed data to {local_path}")
+
+            # 4. Embed the chunks in the Qdrant
+            with logfire.span("Vectorizing & Indexing"):
+                embeddings = embed_texts(chunks)
+                points = [
+                    model.PointStruct(
+                        id = str(uuid.uuid4()),
+                        vector=vector,
+                        payload={
+                            "text":chunk,
+                            "source": filename,
+                            "source_type": source_type,
+                        }
+                    )
+                    for chunk, vector in zip[tuple](chunks, embeddings)
+                ]
+                qdrant_client.upsert(
+                    collection_name=settings.QDRANT_COLLECTION, #collection is table and inside that collection you are adding rows which are points in this case.
+                    points=points, # these are the rows that you are adding to the table, rows are the embeddings and the metadata related to that embedding.
+                )
+                logfire.info(f"Indexed {len(points)} points to Qdrant from {filename}.")
+            
+        except Exception as e:
+            logfire.error(f"Failed to process {filename}: {e}")
+            
+    
+
 
 def process_directory(directory_path: str, source_type: str):
     """
