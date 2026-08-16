@@ -1,6 +1,6 @@
 import time
 # from openai import OpenAI
-from langchain_google_genai import GoogleGenerativeAI
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 import logfire
 from app.config import settings
 
@@ -16,7 +16,7 @@ _model_type:str | None = None
 def _probe_gemini():
     """Try one embed call to verify Gemini is reachable. Returns model or None."""
     try:
-        model = GoogleGenerativeAI(
+        model = GoogleGenerativeAIEmbeddings(
             model="models/gemini-embedding-2",
             google_api_key=settings.GEMINI_API_KEY,
         )
@@ -39,16 +39,16 @@ def _init():
    
     global _active_model, _model_type
 
-        if _active_model is None:
-            return
-        
-        gemini = _probe_gemini()
-        if gemini:
-            _active_model = gemini
-            _model_type = "gemini"
-        else:
-            _active_model = _load_fallback()
-            _model_type = "fallback"
+    if _active_model is not None:
+        return
+    
+    gemini = _probe_gemini()
+    if gemini:
+        _active_model = gemini
+        _model_type = "gemini"
+    else:
+        _active_model = _load_fallback()
+        _model_type = "fallback"
 
 def get_embedding_dim() -> int:
     """
@@ -65,7 +65,7 @@ def _embed_batch(batch: list[str]) -> list[list[float]]:
                 return _active_model.embed_documents(batch)
             except Exception as e:
                 err = str(e).lower()
-                is_rate_limit = any(x in err for x in (429, "rate", "quota", "resource_exhausted"))
+                is_rate_limit = any(x in err for x in ("429", "rate", "quota", "resource_exhausted"))
                 if is_rate_limit and attempt <3:
                     wait = 2 ** attempt
                     logfire.warning(
@@ -95,6 +95,6 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     for i in range(0, len(texts), BATCH_SIZE):
         batch = texts[i: i + BATCH_SIZE]
         with logfire.span("Embed Batch", model = _model_type, start = i, size = len(batch)):
-            all_embeddings.extent(_embed_batch(batch))
+            all_embeddings.extend(_embed_batch(batch))
     
     return all_embeddings

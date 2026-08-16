@@ -21,7 +21,7 @@ PROCESSED_DATA_DIR = "processed_data"
 #Intialize Qdrant Client
 
 qdrant_client = QdrantClient(
-    url=settings.QDRANT_CLUSTER_ENDPOINT,
+    url=settings.QDRANT_URL,
 )
 
 def save_processed_locally(data: dict, source_type: str, filename: str) -> str:
@@ -80,7 +80,7 @@ def process_file(file_path: str, filename: str, source_type: str):
             with logfire.span("Vectorizing & Indexing"):
                 embeddings = embed_texts(chunks)
                 points = [
-                    model.PointStruct(
+                    models.PointStruct(
                         id = str(uuid.uuid4()),
                         vector=vector,
                         payload={
@@ -89,7 +89,7 @@ def process_file(file_path: str, filename: str, source_type: str):
                             "source_type": source_type,
                         }
                     )
-                    for chunk, vector in zip[tuple](chunks, embeddings)
+                    for chunk, vector in zip(chunks, embeddings)
                 ]
                 qdrant_client.upsert(
                     collection_name=settings.QDRANT_COLLECTION, #collection is table and inside that collection you are adding rows which are points in this case.
@@ -98,9 +98,13 @@ def process_file(file_path: str, filename: str, source_type: str):
                 logfire.info(f"Indexed {len(points)} points to Qdrant from {filename}.")
             
         except Exception as e:
-            logfire.error(f"Failed to process {filename}: {e}")
+            logfire.error(
+                "Failed to process {filename}: {error}",
+                filename=filename,
+                error=str(e),
+            )
 
-def process_directory(directory_path: str, source_type: str):
+def process_directory(dir_path: str, source_type: str):
     """
     Process every file in a directory.
     """
@@ -117,12 +121,22 @@ def run_universal_ingestion(base_dir: str, explicit_source_type: str = None, wip
     """
 
     with logfire.span("Universal Ingestion Started", base_directory=base_dir):
+        # if wipe and qdrant_client.collection_exists(settings.QDRANT_COLLECTION):
+        #     qdrant_client.delete_collection(settings.QDRANT_COLLECTION)
+        #     logfire.info(f"Wiped collection '{settings.QDRANT_COLLECTION}'.")
+
+        if wipe:
+            with logfire.span("Wiping Collection"):
+                if qdrant_client.collection_exists(settings.QDRANT_COLLECTION):
+                    qdrant_client.delete_collection(settings.QDRANT_COLLECTION)
+                    logfire.info(f"Wiped collection '{settings.QDRANT_COLLECTION}' deleted.")
+
         #Recreate collection - dimension resolved at runtime after embedding model probe
         if not qdrant_client.collection_exists(settings.QDRANT_COLLECTION):
-            dimension = get_embedding_dim()
+            dim = get_embedding_dim()
             qdrant_client.create_collection(
                 collection_name = settings.QDRANT_COLLECTION,
-                vectors_config = model.VectorParams(
+                vectors_config = models.VectorParams(
                     size = dim,
                     distance = models.Distance.COSINE,
                 )
@@ -131,7 +145,21 @@ def run_universal_ingestion(base_dir: str, explicit_source_type: str = None, wip
                 f"Created collection '{settings.QDRANT_COLLECTION}'"
                 f"({dim}-dim, Cosine)."
             )
-        
+        # else:
+        #     # A collection built with a different embedding model would reject every
+        #     # upsert with an opaque 400, so fail loudly and tell the user to re-ingest.
+        #     existing_dim = qdrant_client.get_collection(
+        #         settings.QDRANT_COLLECTION
+        #     ).config.params.vectors.size
+        #     dim = get_embedding_dim()
+        #     if existing_dim != dim:
+        #         raise RuntimeError(
+        #             f"Collection '{settings.QDRANT_COLLECTION}' has {existing_dim}-dim vectors "
+        #             f"but the active embedding model produces {dim}-dim vectors. "
+        #             f"Re-run with --wipe to recreate the collection."
+        #         )
+
+
         subdirs = [
             d for d in os.listdir(base_dir)
             if os.path.isdir(os.path.join(base_dir, d))
@@ -161,3 +189,14 @@ def run_universal_ingestion(base_dir: str, explicit_source_type: str = None, wip
                 )
                 process_directory(os.path.join(base_dir, subdir), source_type)
 
+if __name__ == "__main__":
+    wipe_requested = "--wipe" in sys.argv
+    clean_args = [a for a in sys.argv if a != "--wipe"]
+    target_dir = clean_args[1] if len(clean_args) > 1 else "DATA"
+    explicit_type = clean_args[2] if len(clean_args) > 2 else None
+    if not os.path.exists(target_dir):
+        print(f"Error: path '{target_dir}' does not exist.")
+        sys.exit(1)
+
+    run_universal_ingestion(target_dir, explicit_source_type=explicit_type, wipe=wipe_requested)
+    logfire.info("Ingestion Job Completed.")
